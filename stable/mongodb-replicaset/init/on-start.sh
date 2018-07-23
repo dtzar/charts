@@ -26,6 +26,12 @@ if [[ "$AUTH" == "true" ]]; then
         metrics_password="$METRICS_PASSWORD"
         monitor_creds=(-u "$monitor_user" -p "$admin_password")
     fi
+    if [[ "$DB_ENABLED" == "true" ]]; then
+        db_user="$DB_USER"
+        db_password="$DB_PASSWORD"
+        db_role="$DB_ROLE"
+        db_name="$DB_NAME"
+    fi
     auth_args=(--auth --keyFile=/data/configdb/key.txt)
 fi
 
@@ -152,8 +158,12 @@ if mongo "${ssl_args[@]}" --eval "rs.status()" | grep "no replset config has bee
         log "Creating admin user..."
         mongo admin "${ssl_args[@]}" --eval "db.createUser({user: '$admin_user', pwd: '$admin_password', roles: [{role: 'root', db: 'admin'}]})"
         if [[ "$METRICS" == "true" ]]; then
-            log "Creating cluterMonitor user..."
+            log "Creating clusterMonitor user..."
             mongo admin "${ssl_args[@]}" --eval "db.auth('$admin_user', '$admin_password'); db.createUser({user: '$metrics_user', pwd: '$metrics_password', roles: [{role: 'clusterMonitor', db: 'admin'}, {role: 'read', db: 'local'}]})"
+        fi
+        if [[ "$DB_ENABLED" == "true" ]]; then
+            log "Creating additional DB User"
+            mongo admin "${ssl_args[@]}" --eval "db.auth('$admin_user', '$admin_password'); db.createUser({user: '$db_user', pwd: '$db_password', roles: [{role: '$db_role', db: '$db_name'}]})"
         fi
     fi
 
