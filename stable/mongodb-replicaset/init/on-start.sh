@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2016 The Kubernetes Authors. All rights reserved.
+# Copyright 2018 The Kubernetes Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ if [[ "$AUTH" == "true" ]]; then
     if [[ "$METRICS" == "true" ]]; then
         metrics_user="$METRICS_USER"
         metrics_password="$METRICS_PASSWORD"
-        monitor_creds=(-u "$monitor_user" -p "$admin_password")
     fi
     if [[ "$DB_ENABLED" == "true" ]]; then
         db_user="$DB_USER"
@@ -32,17 +31,17 @@ if [[ "$AUTH" == "true" ]]; then
         db_role="$DB_ROLE"
         db_name="$DB_NAME"
     fi
-    auth_args=(--auth --keyFile=/data/configdb/key.txt)
+    auth_args=("--auth" "--keyFile=/data/configdb/key.txt")
 fi
 
-function log() {
+log() {
     local msg="$1"
     local timestamp
     timestamp=$(date --iso-8601=ns)
     echo "[$timestamp] [$script_name] $msg" >> /work-dir/log.txt
 }
 
-function shutdown_mongo() {
+shutdown_mongo() {
     if [[ $# -eq 1 ]]; then
         args="timeoutSecs: $1"
     else
@@ -128,11 +127,22 @@ for peer in "${peers[@]}"; do
         sleep 3
 
         log 'Waiting for replica to reach SECONDARY state...'
-        until printf '.'  && [[ $(mongo admin "${admin_creds[@]}" "${ssl_args[@]}" --quiet --eval "rs.status().myState") == '2' ]]; do
+        until printf '.' && [[ $(mongo admin "${admin_creds[@]}" "${ssl_args[@]}" --quiet --eval "rs.status().myState") == '2' ]]; do
             sleep 1
         done
 
         log '✓ Replica reached SECONDARY state.'
+
+        # create the metric user if it does not exist
+        if [[ "$AUTH" == "true" ]]; then
+            if [[ "$METRICS" == "true" ]]; then
+                metric_user_count=$(mongo admin --host "$peer" "${admin_creds[@]}" "${ssl_args[@]}" --eval "db.system.users.find({user: '$metrics_user'}).count()" --quiet)
+                if [ "$metric_user_count" == "0" ]; then
+                    log "Creating clusterMonitor user..."
+                    mongo admin --host "$peer" "${admin_creds[@]}" "${ssl_args[@]}" --eval "db.createUser({user: '$metrics_user', pwd: '$metrics_password', roles: [{role: 'clusterMonitor', db: 'admin'}, {role: 'read', db: 'local'}]})"
+                fi
+            fi
+        fi
 
         shutdown_mongo "60"
         log "Good bye."
@@ -148,7 +158,7 @@ if mongo "${ssl_args[@]}" --eval "rs.status()" | grep "no replset config has bee
     sleep 3
 
     log 'Waiting for replica to reach PRIMARY state...'
-    until printf '.'  && [[ $(mongo "${ssl_args[@]}" --quiet --eval "rs.status().myState") == '1' ]]; do
+    until printf '.' && [[ $(mongo "${ssl_args[@]}" --quiet --eval "rs.status().myState") == '1' ]]; do
         sleep 1
     done
 
@@ -159,11 +169,11 @@ if mongo "${ssl_args[@]}" --eval "rs.status()" | grep "no replset config has bee
         mongo admin "${ssl_args[@]}" --eval "db.createUser({user: '$admin_user', pwd: '$admin_password', roles: [{role: 'root', db: 'admin'}]})"
         if [[ "$METRICS" == "true" ]]; then
             log "Creating clusterMonitor user..."
-            mongo admin "${ssl_args[@]}" --eval "db.auth('$admin_user', '$admin_password'); db.createUser({user: '$metrics_user', pwd: '$metrics_password', roles: [{role: 'clusterMonitor', db: 'admin'}, {role: 'read', db: 'local'}]})"
+            mongo admin "${admin_creds[@]}" "${ssl_args[@]}" --eval "db.createUser({user: '$metrics_user', pwd: '$metrics_password', roles: [{role: 'clusterMonitor', db: 'admin'}, {role: 'read', db: 'local'}]})"
         fi
         if [[ "$DB_ENABLED" == "true" ]]; then
             log "Creating additional DB User"
-            mongo admin "${ssl_args[@]}" --eval "db.auth('$admin_user', '$admin_password'); db.createUser({user: '$db_user', pwd: '$db_password', roles: [{role: '$db_role', db: '$db_name'}]})"
+            mongo admin "${admin_creds[@]}" "${ssl_args[@]}" --eval "db.createUser({user: '$db_user', pwd: '$db_password', roles: [{role: '$db_role', db: '$db_name'}]})"
         fi
     fi
 
