@@ -115,23 +115,22 @@ spec:
                 secretKeyRef:
                   name: "{{ template "mongodb-replicaset.adminSecret" . }}"
                   key: password
-          {{- if .Values.db.enabled }}
+          {{- if .Values.auth.additionalUsers }}
             - name: DB_ENABLED
               value: "true"
-            - name: DB_USER
+          {{- range $i, $users := .Values.auth.additionalUsers }}
+            - name: DB_USER{{ add1 $i }}
               valueFrom:
                 secretKeyRef:
                   name: "{{ template "mongodb-replicaset.dbSecret" . }}"
-                  key: user
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: "{{ template "mongodb-replicaset.dbSecret" . }}"
-                  key: password
-            - name: DB_NAME
-              value: "{{ .Values.db.name }}"
-            - name: DB_ROLE
-              value: "{{ .Values.db.role }}"
+                  key: "user{{ add1 $i }}"
+            - name: DB_PASSWORD{{ add1 $i }}
+              value: "{{ $users.password }}"
+            - name: DB_NAME{{ add1 $i }}
+              value: "{{ $users.dbname }}"
+            - name: DB_ROLE{{ add1 $i }}
+              value: "{{ $users.role }}"
+          {{- end }}
           {{- end }}
           {{- if .Values.metrics.enabled }}
             - name: METRICS
